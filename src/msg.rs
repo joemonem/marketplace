@@ -54,7 +54,6 @@ pub struct ListingResponse {
     pub token_id: String,
     pub price: Coin,
     pub expiry: u64,
-    pub approvals: Vec<Approval>,
 }
 
 // We define a custom struct for each query response

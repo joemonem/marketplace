@@ -2,9 +2,9 @@ use std::str::from_utf8;
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    coin, entry_point, to_binary, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Order, Pair, Querier, QuerierWrapper, QueryRequest, Response, StdError, StdResult,
-    Storage, Uint128, WasmMsg, WasmQuery,
+    coin, entry_point, to_binary, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Deps, DepsMut,
+    Env, MessageInfo, Order, Pair, Querier, QuerierWrapper, QueryRequest, Response, StdError,
+    StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 use cw721::{Cw721QueryMsg, Expiration, OwnerOfResponse};
@@ -17,9 +17,7 @@ use crate::error::ContractError;
 use crate::msg::{
     ExecuteMsg, InstantiateMsg, ListingResponse, ListingsResponse, QueryListingsResponse, QueryMsg,
 };
-use crate::state::{
-    Approval, OfferingsResponse, QueryOfferingsResult, NFT, NFTLIST, OPERATORS,
-};
+use crate::state::{Approval, OfferingsResponse, QueryOfferingsResult, NFT, NFTLIST, OPERATORS};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:marketplace";
@@ -52,7 +50,16 @@ pub fn execute(
             price,
             minimum_bid,
             token_id,
-        } => execute_list(deps, env, info, price, expires, minimum_bid, token_id),
+        } => execute_list(
+            deps,
+            env,
+            info,
+            price,
+            expires,
+            minimum_bid,
+            token_id,
+            contract_address,
+        ),
         ExecuteMsg::Buy { token_id } => execute_buy(deps, env, info, token_id),
         ExecuteMsg::Unlist { token_id } => todo!(),
         ExecuteMsg::Approve {
@@ -78,19 +85,19 @@ fn get_token_owner(
     Ok(res.owner)
 }
 // ideally should be Deps since the function doesn't make any changes
-fn is_in_list(token_id: String, deps: DepsMut) -> bool {
-    let presence = NFTLIST.load(deps.storage, token_id);
-    match presence {
-        Ok(NFT {
-            owner,
-            token_id,
-            price,
-            expiry,
-            approvals,
-        }) => return true,
-        _ => return false,
-    }
-}
+// fn is_in_list(token_id: String, deps: DepsMut) -> bool {
+//     let presence = NFTLIST.load(deps.storage, token_id);
+//     match presence {
+//         Ok(NFT {
+//             owner,
+//             token_id,
+//             price,
+//             expiry,
+//             approvals,
+//         }) => return true,
+//         _ => return false,
+//     }
+// }
 fn check_can_approve(
     deps: Deps,
     env: &Env,
@@ -151,7 +158,7 @@ pub fn _update_approvals(
         token.approvals.push(approval);
     }
 
-    NFTLIST.save( deps.storage, (&token_id).to_string(), &token)?;
+    NFTLIST.save(deps.storage, (&token_id).to_string(), &token)?;
 
     Ok(token)
 }
@@ -232,6 +239,7 @@ pub fn execute_list(
     expires: u64,
     minimum_bid: Uint128,
     token_id: String,
+    contract_address: String,
 ) -> Result<Response, ContractError> {
     // get token owner
     let token_owner = get_token_owner(deps.storage, querier, token_id)?;
@@ -272,9 +280,9 @@ pub fn execute_list(
     let newnft = NFT {
         owner: deps.api.addr_canonicalize(&info.sender.to_string())?,
         token_id,
-        price: coin(100, "UST"),
+        price,
         expiry: expires,
-        approvals: ,
+        contract_addr: deps.api.addr_canonicalize(&contract_address.to_string())?,
     };
     let newlist = NFTLIST.save(deps.storage, token_id, &newnft)?;
 
@@ -308,6 +316,7 @@ pub fn execute_buy(
 
     //remove from list
     NFTLIST.remove(deps.storage, token_id);
+    _transfer_nft(&depsmut, &deps, &env, &info, &recipient, &token_id);
 
     // send funds to seller
     // transfer NFT to buyer
@@ -331,7 +340,7 @@ pub fn execute_buy(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetListing { token_id } => to_binary(&query_listing(deps, token_id)?),
-        QueryMsg::GetAllListings { start: (), end: () } => to_binary(&query_all(deps)?),
+        QueryMsg::GetAllListings { start: (), end: () } => to_binary(&query_offerings(deps)?),
     }
 }
 
@@ -342,7 +351,6 @@ fn query_listing(deps: Deps, token_id: String) -> StdResult<ListingResponse> {
         token_id,
         price: state.price,
         expiry: state.expiry,
-        approvals: state.approvals,
     })
 }
 
@@ -355,7 +363,7 @@ fn query_listing(deps: Deps, token_id: String) -> StdResult<ListingResponse> {
 fn query_offerings(deps: Deps) -> StdResult<OfferingsResponse> {
     let res: StdResult<Vec<QueryOfferingsResult>> = NFTLIST
         .range(deps.storage, None, None, Order::Ascending)
-        .map(|kv_item| parse_offering(deps.api, kv_item))
+        .map(|kv_item| parse_offering(kv_item))
         .collect();
 
     Ok(OfferingsResponse {
@@ -370,12 +378,11 @@ fn parse_offering(item: StdResult<Pair<NFT>>) -> StdResult<QueryOfferingsResult>
             id: id.to_string(),
             token_id: offering.token_id,
             list_price: offering.price,
+            contract_addr: offering.contract_addr.to_string(),
             seller: offering.owner.to_string(),
-            contract_addr: todo!(),
-        
         })
-    }
-
+    })
+}
 
 // #[cfg(test)]
 // mod tests {

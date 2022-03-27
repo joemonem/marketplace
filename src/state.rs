@@ -14,7 +14,7 @@ pub struct NFT {
     pub token_id: String,
     pub price: Coin,
     pub expiry: u64,
-    pub approvals: Vec<Approval>,
+    pub contract_addr: CanonicalAddr,
 }
 
 pub const NFTLIST: Map<String, NFT> = Map::new("lists");
